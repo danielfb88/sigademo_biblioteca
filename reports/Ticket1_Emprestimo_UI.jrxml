@@ -10,8 +10,8 @@
 		<filterExpression><![CDATA[Boolean.TRUE]]></filterExpression>
 	</subDataset>
 	<parameter name="CODIGOACESSO" class="java.lang.String"/>
-	<queryString language="SQL">
-		<![CDATA[SELECT
+	<queryString>
+		<![CDATA[SELECT DISTINCT
 p.nome,
 v.codigoacesso,
 obr.titulo,
@@ -33,7 +33,6 @@ JOIN bt_exemplar exemp ON (exemp.idexemplar = empr.idexemplar)
 WHERE
 v.codigoacesso = $P{CODIGOACESSO} AND
 empr.datahoradadevolucao IS NULL AND
-(a.idetiqueta = 53 OR a.idetiqueta = 154) AND
 a.subcampo = 'a']]>
 	</queryString>
 	<field name="nome" class="java.lang.String"/>
