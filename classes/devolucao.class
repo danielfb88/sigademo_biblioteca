@@ -217,8 +217,13 @@ class BusinessBibliotecaDevolucao extends Business
 	 * @param int $idEmprestimo
 	 * @return int $idExemplar
 	 */
-	function devolverExemplar($idEmprestimo, $idExemplar) {
+	function devolverExemplar($idEmprestimo, $tombo) {
 		global $MIOLO, $module;
+
+		// Adicionado em 16-03-2013 / Daniel Bonfim
+		if(is_null($this->getTransaction())) {
+			$this->beginTransaction();
+		}
 
 		$k = new MKrono();
 		$dataHoje = $k->KDate('%d/%m/%Y %H:%i:00');
@@ -242,15 +247,28 @@ class BusinessBibliotecaDevolucao extends Business
 
 		// Alterando a situação do exemplar
 		$bussEstado = $MIOLO->GetBusiness($module, 'estado');
+		$bussExemplar = $MIOLO->GetBusiness($module, 'exemplar');
 
-		$sql = new sql('idestado', 'bt_exemplar', 'idexemplar = ?');
-		$idEstado = $bussEstado->GetIdByMnemonico("DISPONIVEL");
+		/*
+		 * Modificação em 16-03-2013
+		* Modificando o estado para DISPONÍVEL apenas se o estado atual for diferente de RESERVADO
+		*/
+		$idEstadoAtual = $bussExemplar->GetEstadoByExemplar($tombo);
 
-		$this->Execute(
-				$sql->Update(
-						array($idEstado, $idExemplar)
-				)
-		);
+		if($idEstadoAtual != $bussEstado->GetIdByMnemonico("RESERVADO")) {
+
+			$sql = new sql('idestado', 'bt_exemplar', 'numerodotombo = ?');
+			$idEstado = $bussEstado->GetIdByMnemonico("DISPONIVEL");
+
+			$this->Execute(
+					$sql->Update(
+							array($idEstado, $tombo)
+					)
+			);
+
+		}
+
+		$this->endTransaction();
 	}
 
 	function DevolucaoComMulta($data)

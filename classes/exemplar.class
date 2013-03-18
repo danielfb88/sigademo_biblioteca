@@ -208,11 +208,11 @@ class BusinessBibliotecaExemplar extends Business
 		' e.idexemplar = ? and e.idobra=o.idobra and es.idestado=e.idestado and a.idautor=o.idautor and a.idetiqueta = 53 ');
 
 		"e.idexemplar = ? and e.idobra=o.idobra and es.idestado=e.idestado and a.idautor=o.idautor and a.idetiqueta = 53 and a.subcampo ='a'    ");
-		 
+			
 
 
 
-		 
+			
 
 
 
@@ -252,18 +252,74 @@ class BusinessBibliotecaExemplar extends Business
 		$query = $this->Query($sql,$tombo);
 		return $query->result[0][0];
 	}
-	
+
 	/**
 	 * Obtém o id da regra de circulação pelo ID do exemplar.
-	 * 
+	 *
 	 * @author Daniel Bonfim
 	 * @since 22-02-2013
-	 * 
+	 *
 	 * @param int $idExemplar
 	 */
 	function getIdRegraCirculacaoByIdExemplar($idExemplar) {
 		$sql = new sql('idregracirculacao','bt_exemplar','idexemplar = ?');
 		return $this->Query($sql, $idExemplar)->result[0][0];
+	}
+
+	/**
+	 * Verifica se o exemplar está reservado pelo número do tombo
+	 *
+	 * @author Daniel Bonfim
+	 * @since 12-03-2013
+	 *
+	 * @param unknown $tombo
+	 * @return boolean
+	 */
+	function estaReservado($tombo) {
+		global $MIOLO, $module;
+
+		$bussEstado = $MIOLO->GetBusiness($module, 'estado');
+		$idEstadoReservado = $bussEstado->GetIdByMnemonico('RESERVADO');
+
+		$sql = new sql('idexemplar','bt_exemplar',"numerodotombo = ? AND idestado = $idEstadoReservado");
+		$query = $this->Query($sql, array($tombo));
+
+		$estaReservado = is_null($query->result[0][0]) ? false : true;
+	}
+
+	/**
+	 * Obtém informações sobre as condições impostas para o empréstimo do exemplar
+	 * baseado no grupo do usuário informado pelo 'idusuario'.
+	 *
+	 * @author Daniel Bonfim
+	 * @since 12-03-2013
+	 *
+	 * @param int $tombo
+	 * @param int $idusuario
+	 */
+	function getCondicoesDoExemplarPorUsuario($tombo, $idusuario) {
+		$sql = new sql("
+				grupo.idgrupo,
+				exemplar.idexemplar,
+				exemplar.idestado,
+				exemplar.idregracirculacao,
+				exemplar.idobra,
+				politica.diasdeemprestimo,
+				politica.diasdereserva,
+				politica.limitedeemprestimo,
+				politica.limitederenovacao,
+				politica.limitedereserva
+
+				FROM
+				bt_exemplar exemplar JOIN
+				bt_politica politica ON (exemplar.idregracirculacao = politica.idregracirculacao) JOIN
+				bt_grupo grupo ON (grupo.idgrupo = politica.idgrupo) JOIN
+				bt_vinculo vinculo ON (grupo.idgrupo = vinculo.idgrupo) JOIN
+				cm_usuario usuario ON (usuario.idusuario = vinculo.idusuario)
+
+				WHERE exemplar.numerodotombo = ? AND usuario.idusuario = $idusuario");
+
+		return $this->Query($sql, $tombo)->result[0];
 	}
 
 
@@ -371,7 +427,7 @@ class BusinessBibliotecaExemplar extends Business
 
 		$this->execute($commands);
 	}
-	 
+
 	function InsertMany($data)
 	{
 		$quantidade = 1;
@@ -533,6 +589,24 @@ class BusinessBibliotecaExemplar extends Business
 	 return $criteria->retrieveAsCursor();
 	}
 
+	/**
+	 * Obtém o título da obra do exemplar
+	 *
+	 * @author Daniel Bonfim
+	 * @since 16-03-2013
+	 *
+	 * @param string $tombo
+	 * @return string
+	 */
+	function getTituloByTombo($tombo) {
+		$sql = new sql('o.titulo', 'bt_obra o, bt_exemplar e', '(e.numerodotombo = ?) AND (e.idobra = o.idobra)');
+		$query = $this->Query($sql,$tombo);
+		return $query->result[0][0];
+	}
+
+	/**
+	 * @deprecated
+	 */
 	function GetTituloByExemplar($tombo)
 	{
 		//$sql = new sql('o.titulo','bt_estado e,bt_exemplar x,bt_obra o','(numerodotombo=?) AND (o.idobra = x.idobra) AND (e.idestado=x.idestado)');
@@ -548,13 +622,28 @@ class BusinessBibliotecaExemplar extends Business
 		return $query->result[0][0];
 	}
 
+	/**
+	 * Obtém o estado pelo id
+	 *
+	 * @author Daniel Bonfim
+	 * @since 16-03-2013
+	 *
+	 * @param int $idExemplar
+	 * @return int
+	 */
+	function getIdEstadoByIdExemplar($idExemplar) {
+		$sql = new sql('idestado', 'bt_exemplar', 'idexemplar = ?');
+		$query = $this->Query($sql, $idExemplar);
+		return $query->result[0][0];
+	}
+
 	function GetEstadoByExemplar($tombo)
 	{
 		$sql = new sql('idestado','bt_exemplar','numerodotombo = ?');
 		$query = $this->Query($sql,$tombo);
 		return $query->result[0][0];
 	}
-	
+
 	function AlteraEstado($tombo, $estado){
 		$sql = new sql('idestado', 'bt_exemplar', 'numerodotombo = ?');
 
@@ -709,8 +798,37 @@ class BusinessBibliotecaExemplar extends Business
 				'bt_exemplar e, bt_regracirculacao r',
 				"(e.idregracirculacao = r.idregracirculacao) AND (upper(r.descricao) like '%CONSULTA%') AND (e.idexemplar = ?)"
 		);
-		
+
 		$query = $this->Query($sql, $idexemplar);
+		return !is_null($query->result[0][0]);
+	}
+
+	/**
+	 * Verifica se o exemplar existe pelo id ou pelo número do tombo
+	 *
+	 * @author Daniel Bonfim
+	 * @since 13-03-2013
+	 *
+	 * @param int $idExemplar
+	 * @param int $tombo
+	 * @return boolean
+	 */
+	function isExemplarExiste($idExemplar = null, $tombo = null) {
+		$where = '1=1';
+
+		if(!is_null($idExemplar)) {
+			$where .= ' AND idexemplar = ? ';
+			$values[] = $idExemplar;
+		}
+
+		if(!is_null($tombo)) {
+			$where .= "AND numerodotombo = ? ";
+			$values[] = $tombo;
+		}
+
+		$sql = new sql('e.idexemplar', 'bt_exemplar e', $where);
+		$query = $this->Query($sql, $values);
+
 		return !is_null($query->result[0][0]);
 	}
 

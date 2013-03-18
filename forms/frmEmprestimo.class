@@ -530,269 +530,338 @@ class frmEmprestimo extends Form
 			$report->Execute('biblioteca','Ticket3_Emprestimo_UI',$parameters);
 	}
 
-	function btnRealizarEmprestimo_click()
-	{
-		global $MIOLO,$module,$item,$self, $theme, $action, $page,$datagrid;
 
-		//$this->page->onLoad('document.'.$this->name.'.edtExemplar.focus();');
+
+	/**
+	 * @author Daniel Bonfim
+	 * @since 12-03-2013
+	 */
+	function btnRealizarEmprestimo_click() {
+		global $MIOLO, $module, $item, $self, $theme, $action, $page, $datagrid;
+
 		$this->page->onLoad("MIOLO_GetElementById('edtExemplar').focus();");
 
-		// Atributo dos botões
-		$this->SetButtonAttr('btnVerificar','visible',false);
+		// Botões visíveis
 		$this->SetButtonAttr('btnRealizarEmprestimo','visible',true);
-		$this->SetButtonAttr('btnImprimirRecibo','visible', true );
-		//$this->SetButtonAttr('btnImprimirRecibo','visible', true );
+
+		// Botões invisíveis
+		$this->SetButtonAttr('btnImprimirRecibo','visible', false);
+		$this->SetButtonAttr('btnVerificar','visible',false);
 		$this->SetButtonAttr('btnConsulta','visible',false);
 		$this->SetButtonAttr('btnConfirmar','visible',false);
 
-		$data = $this->GetData();
-		//var_dump($data);
-			
-		//Instancia a classe Emprestimo
-		$objEmprestimo = $MIOLO->GetBusiness($module,'emprestimo');
-
-		//Propriedades dos campos
+		// Campos visíveis
 		$this->SetFieldAttr('edtNome','visible',true);
-		$this->SetFieldAttr('edtSenha','visible',false);
-		$this->SetFieldAttr('edtCartaoAcesso','readonly',true);
 		$this->SetFieldAttr('edtNome','readonly',true);
 		$this->SetFieldAttr('edtSenha','readonly',true);
 		$this->SetFieldAttr('edtExemplar','visible', true);
 
-		// Vamos Transformar a string em um Array de 1 elemento
-		$Exemplares =  array();
-		array_push($Exemplares,$data->exemplar);
+		// Campos invisíveis
+		$this->SetFieldAttr('edtSenha','visible',false);
+
+		// Campos somente leitura
+		$this->SetFieldAttr('edtCartaoAcesso','readonly',true);
+
+		$data = $this->GetData();
+			
+		// Business
+		$bussEmprestimo = $MIOLO->GetBusiness($module, 'emprestimo');
+		$bussOperacao = $MIOLO->GetBusiness($module, 'operacao');
+		$bussExemplar = $MIOLO->GetBusiness($module, 'exemplar');
+		$bussReserva = $MIOLO->GetBusiness($module, 'reserva');
+		$bussDireito = $MIOLO->GetBusiness($module, 'direito');
+		$bussEstado = $MIOLO->GetBusiness($module, 'estado');
+
+		if(!empty($data->exemplar)) {
+
+			if($bussExemplar->isExemplarExiste($data->exemplar)) {
+
+				$condicoesDoExemplarPorUsuario = $bussExemplar->getCondicoesDoExemplarPorUsuario($data->exemplar, $data->idusuario);
+				if(!is_null($condicoesDoExemplarPorUsuario)) {
+
+					$condicoesDoExemplar = array(
+							'idGrupo' => $condicoesDoExemplarPorUsuario[0],
+							'idExemplar' => $condicoesDoExemplarPorUsuario[1],
+							'idEstado' => $condicoesDoExemplarPorUsuario[2],
+							'idRegraCirculacao' => $condicoesDoExemplarPorUsuario[3],
+							'idObra' => $condicoesDoExemplarPorUsuario[4],
+							'diasEmprestimo' => $condicoesDoExemplarPorUsuario[5],
+							'diasReserva' => $condicoesDoExemplarPorUsuario[6],
+							'limiteDeEmprestimo' => $condicoesDoExemplarPorUsuario[7],
+							'limiteDeRenovacao' => $condicoesDoExemplarPorUsuario[8],
+							'limiteDeReserva' => $condicoesDoExemplarPorUsuario[9],
+					);
+
+					// Será exibido no grid
+					$MensagemRetorno = null;
+					$dataPrevDevolucao = null;
+
+					switch ($condicoesDoExemplar['idEstado']) {
+							
+						/*
+						 * DISPONÍVEL
+						*/
+						case $bussEstado->GetIdByMnemonico("DISPONIVEL"):
+
+							// Efetuando Empréstimo
+							$this->efetuarEmprestimo($data->idusuario, $data->exemplar, $condicoesDoExemplar, $MensagemRetorno, $dataPrevDevolucao);
+								
+							break;
+
+							/*
+							 * EMPRESTADO
+						 */
+						case $bussEstado->GetIdByMnemonico("EMPRESTADO"):
+
+							// botões
+							$this->SetButtonAttr('btnRealizarEmprestimo', 'visible', false);
+
+							$arrEmprestimo = $bussEmprestimo->getInfoEmprestimoAberto($condicoesDoExemplar['idExemplar'], $condicoesDoExemplar['idObra']);
+							$infoEmprestimo = array(
+									'idemprestimo' => $arrEmprestimo[0],
+									'datahoradoemprestimo' => $arrEmprestimo[1],
+									'datahoraprevisaodevolucao' => $arrEmprestimo[2],
+									'datahoradevolucao' => $arrEmprestimo[3],
+									'quantidadederenovacoes' => $arrEmprestimo[4],
+									'idusuario' => $arrEmprestimo[5]
+							);
+
+							// Se o usuário responsável pelo empréstimo for o mesmo que estiver solicitando
+							if($infoEmprestimo['idusuario'] == $data->idusuario) {
+								$MensagemRetorno = "<font color='red'> Exemplar emprestado para o próprio usuário. </font>";
+							} else {
+								$MensagemRetorno = "<font color='red'> Este exemplar está emprestado! </font>";
+							}
+
+							break;
+
+							/*
+							 * RESERVADO
+						 */
+						case $bussEstado->GetIdByMnemonico("RESERVADO"):
+
+							// Obtendo informações da reserva
+							$arrReserva = $bussReserva->getReservaByIdExemplar($bussExemplar->GetIdByTombo($data->exemplar));
+
+							$infoReserva = array(
+									'idreserva' => $arrReserva[0],
+									'datahoradareserva' => $arrReserva[1],
+									'idsituacao' => $arrReserva[2],
+									'idusuario' => $arrReserva[3],
+									'idexemplar' => $arrReserva[4]
+							);
+
+							// Adiciona sábados e domingos
+							$qtdDiasValidadeDaReserva = $this->CalculaDias($condicoesDoExemplar['diasReserva']);
+
+							$arrDataHoraReserva = explode('-', $infoReserva['datahoradareserva']);
+							$ano = $arrDataHoraReserva[0];
+							$mes = $arrDataHoraReserva[1];
+							$dia = $arrDataHoraReserva[2];
+
+							// TimeStamp da Validade da reserva
+							$timestampValidadeReserva = mktime(0, 0, 0, $mes, $dia + $qtdDiasValidadeDaReserva, $ano);
+
+							// TimeStamp atual
+							$timestampAtual = time();
 
 
-		// o Resultado final do sistema
-		// Retirado para entrada do GRID
-		//$Resultado = " <BR><BR> Resultado: <BR><BR> ";
+							// Verificando se a reserva ainda tem validade
+							if($timestampAtual <= $timestampValidadeReserva) {
 
-		//$objEmprestimo->BeginTransaction();
+								// Verificando se o usuário que está solicitando o emprestimo é o mesmo que efetuou a reserva
+								if($data->idusuario == $infoReserva['idusuario']) {
 
-		if ($Exemplares)
-		{
+									// Efetuando Empréstimo
+									$this->efetuarEmprestimo($data->idusuario, $data->exemplar, $condicoesDoExemplar, $MensagemRetorno, $dataPrevDevolucao);
 
-			// Faz a mesma verificação dos exemplares
-
-			//Se o campo "Exemplar" estiver vazio, não faz a pesquisa no banco.
-			if($Exemplares[0] != "")
-				$Exemplares = $objEmprestimo->GetExemplares($Exemplares,$data->idusuario);
-
-			$Exemplares = $Exemplares->result;
-
-			$Resultado = Array();
-			$i = 0;
-			//
-			//  $resultado[$i][0] = Numero Do Tombo
-			//  $resultado[$i][1] = Mensagem
-			//  $resultado[$i][2] = Data Prev Devolucao
-
-			foreach ($Exemplares as $Exemplar)
-			{
-				//$a = $data->exemplar;
-
-				$EmprestimoOK = true;
-
-				$Resultado[$i][0] = $Exemplar[0];
-
-				$idusuario = $data->idusuario;
-
-				if (!$Exemplar[6]) // Emprestimo impedido?
-				{
-
-
-					// item 4.9
-					$query =$objEmprestimo->GetSituacao("ATENDIDA");
-					$idSituacaoAtendida = $query->result[0][0];
-
-					// item 4.10
-					$query = $objEmprestimo->GetSituacao("CONFIRMADA");
-					$idSituacaoConfirmada = $query->result[0][0];
-
-					// item 4.11
-					$query = $objEmprestimo->EstaReservado($idSituacaoAtendida,$Exemplar[0]);
-					$idReserva = $query->result[0][0];
-					$usuarioReserva = $query->result[0][1];
-
-					$query = $objEmprestimo->NumeroTomboToIDExemplar($Exemplar[0]);
-					$idExemplar = $query->result[0][0];
-
-					$query = $objEmprestimo->EstaEmprestado($idExemplar);
-					$idEmprestimo = $query->result[0][0];
-
-					/*
-					 * Substituido o método 'EstaEmprestadoIdObra' por 'isObraEmprestadaParaUsuario'
-					* @author Daniel Bonfim
-					* @since 06-03-2013
-					*/
-					$tombo = $Exemplar[0];
-					$isObraEmprestadaParaUsuario = $objEmprestimo->isObraEmprestadaParaUsuario($tombo, $idusuario);
-
-					if(!$isObraEmprestadaParaUsuario){
-
-						if (!($idEmprestimo )) // exemplar já está emprestado (f5 na pagina)
-						{
-
-							if ($usuarioReserva) // existe alguma reserva !!
-							{
-
-								if ($usuarioReserva = $idusuario) // a reserva é do usuario !!
-								{
-
-									if ($objEmprestimo->ConfirmarReserva($idReserva,$idSituacaoConfirmada))
-									{
-										//$Resultado .= " $Exemplar[0]: Reserva atendida <BR>";
-										$Resultado[$i][1] = " Reserva atendida ";
-										if ($arrayEmp = $objEmprestimo->ConfirmarEmprestimo($Exemplar[0],$idusuario,$this->manager->GetLogin()->idkey))
-										{
-											$Resultado[$i][1] .= " - empréstimo confirmado ";
-											$Resultado[$i][2] = $arrayEmp[1];
-										}
-									}
+								} else {
+									$MensagemRetorno = "<font color='red'> Este exemplar está reservado. </font>";
 								}
+
+							} else {	// Reserva vencida
+
+								// Efetuando Empréstimo
+								$this->efetuarEmprestimo($data->idusuario, $data->exemplar, $condicoesDoExemplar, $MensagemRetorno, $dataPrevDevolucao);
 
 							}
-							else
-							{
 
-								if ($arrayEmp = $objEmprestimo->ConfirmarEmprestimo($Exemplar[0],$idusuario,$this->manager->GetLogin()->idkey))
-								{
+							break;
 
-									$data = $this->GetData();
-									$mumerodotombo = $data->exemplar;
-									$this->objExemplar = $MIOLO->GetBusiness($module,'exemplar');
-									$this->objEmprestimo = $MIOLO->GetBusiness($module,'emprestimo');
-									//$notaCirculacao = $this->objExemplar->getNotaCirculacao($mumerodotombo)->result[0][0];
+						default:
+							$go = $MIOLO->GetActionURL($module, $self);
+							$MIOLO->Error("Exemplar indisponível para empréstimo.", $go);
 
-
-									//$exemplar recebe o objeto, de acordo com o nº do tombo inserido
-									$exemplar = $this->objExemplar->GetByTombo($data->exemplar);
-									//tem-se a 'notadecirculacao' do objeto
-									$notaCirculacao = $exemplar->getObject()->notacirculacao;
-
-
-
-									//$Resultado .= " $Exemplar[0]: Empréstimo Confirmado. Devolucao em:  " . $arrayEmp[1];
-									if ($notaCirculacao != null)
-									{
-										$Resultado[$i][1] = "Empréstimo Confirmado - " . "<font color=red>Nota: $notaCirculacao </font>";
-										$Resultado[$i][2] = $arrayEmp[1];
-									}
-									else
-									{
-										$Resultado[$i][1] = "Empréstimo Confirmado";
-										$Resultado[$i][2] = $arrayEmp[1];
-									}
-								}
-
-								else
-								{
-									$Resultado[$i][1] = " <font color=red> Ocorreu algum problema ao realizar o empréstimo. </font>";
-								}
-
-							}
-						}
-						else
-						{
-							$Resultado[$i][1] = " <font color=red> Este exemplar está emprestado </font> ";
-						}
-					}else{
-						$Resultado[$i][1] = " <font color=red> Este usuário já está com um exemplar desta obra </font> ";
 					}
 
+					/**
+					 * Grid
+					 */
+					$dataGrid_values[0][0] = $data->exemplar;
+					$dataGrid_values[0][1] = $bussExemplar->getTituloByTombo($data->exemplar);
+					$dataGrid_values[0][2] = $MensagemRetorno;
+					$dataGrid_values[0][3] = $dataPrevDevolucao;
 
-				} // fim do if not _
-				else
-				{
-					$Resultado[$i][1] = " Problemas com o Exemplar: " . $Exemplar[5];
+					$columns = array(
+							new GridColumn('Exemplar', 'right', true, '10%',true,null,false,true),
+							new GridColumn('Título', 'left',  false, '30%',true,null,false,true),
+							new GridColumn('Mensagem', 'left', false, '44%',true,null,false,true),
+							new GridColumn('Prev Dev', 'left', true, '16%',true,null,false,true)
+					);
+
+					$href_datagrid = $MIOLO->GetActionURL($module,$self);
+					$datagrid = new Grid($dataGrid_values, $columns, $href_datagrid, 50);
+					$datagrid->SetTitle('Resultado');
+					$datagrid->SetWidth('99%');
+
+					//Esconde os campos
+					$this->SetFieldAttr('edtNome','visible', true);
+					$this->SetFieldAttr('edtSenha','visible', false);
+					$this->SetFieldAttr('edtExemplar','visible',  true);
+					$this->SetFieldAttr('edtCartaoAcesso','visible', true);
+
+					// Atributo dos botões
+					$this->SetButtonAttr('btnConsulta','visible',false);
+					$this->SetButtonAttr('btnVerificar','visible',false);
+					$this->SetButtonAttr('btnRealizarEmprestimo','visible',true);
+					$this->SetButtonAttr('btnConfirmar','visible',false);
+					$this->SetButtonAttr('btnVoltar','visible',true);
+
+					$theme->AppendContent($datagrid);
+
+
+					// Limpando campo do exemplar
+					$this->SetFieldValue('edtExemplar','');
+
+					// Liberando o botão de impressão de recibo
+					$this->SetButtonAttr('btnImprimirRecibo','visible', true);
+
+				} else {
+					$go = $MIOLO->GetActionURL($module, $self);
+					$MIOLO->Error("Exemplar sem política de circulação.", $go);
 				}
 
-
-				if (empty($Resultado[$i][2]))
-					$Resultado[$i][2] = 0;
-
-				$i++;
-
-
+			} else {
+				$go = $MIOLO->GetActionURL($module, $self);
+				$MIOLO->Error("O exemplar informado não existe.", $go);
 			}
-
 		}
-		else
-		{
-			$goto = $MIOLO->GetActionURL($module,$self);
-			$MIOLO->Error('<font color=red>Nenhum exemplar selecionado. Por favor, volte e selecione os exemplares.</font>', $goto,500);
-		}
+	}
 
-		//$objEmprestimo->EndTransaction();
+	/**
+	 * Efetua as verificações necessárias para o empréstimo do exemplar.
+	 *
+	 * @author Daniel Bonfim
+	 * @since 17-03-2013
+	 *
+	 * @param int $idUsuario - Usuário que esta solicitando o empréstimo
+	 * @param int $idExemplar - Exemplar a ser emprestado
+	 * @param array $condicoesDoExemplar - Informações sobre as condições de empréstimo do exemplar. Verifique o método 'btnRealizarEmprestimo_click'
+	 * @param string $MensagemRetorno - A mensagem que será exibida no grid sobre o status da operação. Passagem por referência.
+	 * @param string $dataPrevDevolucao - Data da previsão de devolução caso o empréstimo seja bem sucedido. Passagem por referência.
+	 */
+	function efetuarEmprestimo($idUsuario, $tombo, $condicoesDoExemplar, &$MensagemRetorno, &$dataPrevDevolucao) {
+		global $MIOLO, $module;
 
-		//$this->objExemplar = $MIOLO->GetBusiness($module,'exemplar');
-		$this->objEmprestimo = $MIOLO->GetBusiness($module,'emprestimo');
-
-
-		// como é um exemplar mesmo, pode fazer essa lenha ae:
-		// adicionando o campo título
-		$Resultado[0][3] = $Resultado[0][2];
-		$Resultado[0][2] = $Resultado[0][1];
-
-		if ($Exemplar[2])
-		{
-			$Resultado[0][1] = $this->objEmprestimo->getTitulo($Exemplar[0])->result[0][0];
-		}
-		else
-			$Resultado[0][1] = "-";
+		$bussEmprestimo = $MIOLO->GetBusiness($module, 'emprestimo');
+		$bussOperacao = $MIOLO->GetBusiness($module, 'operacao');
+		$bussExemplar = $MIOLO->GetBusiness($module, 'exemplar');
+		$bussDireito = $MIOLO->GetBusiness($module, 'direito');
 
 		/*
-		 if ( !$Exemplar[6] )
-			$Resultado[0][1] = $objEmprestimo->getTitulo($Exemplar[6])->result[0][0];
-		else
-			$Resultado[0][1] = "-";
-
+		 * Verificando se o exemplar está Disponível para empréstimo.
+		* Será verificado se todos os empréstimo deste exemplar estão fechados.
 		*/
 
+		if(!$bussEmprestimo->isEmprestadoByIdExemplar($bussExemplar->GetIdByTombo($tombo))) {
 
+			// Obtendo o Id da Operação de Empréstimo
+			$idOperacaoEmprestimo = $bussOperacao->getIdOperacaoByMnemonico2("EMPRESTIMO");
 
-		$columns = array(
-				new GridColumn('Exemplar', 'right', true, '10%',true,null,false,true),
-				new GridColumn('Título', 'left',  false, '30%',true,null,false,true),
-				new GridColumn('Mensagem', 'left', false, '44%',true,null,false,true),
-				new GridColumn('Prev Dev', 'left', true, '16%',true,null,false,true)
-		);
+			// Verificando se o grupo do usuário possui direitos para realizar a operação de empréstimo
+			$possuiDireitoDeEmprestimo = $bussDireito->isGrupoComDireitoDeRealizarOperacao(
+					$condicoesDoExemplar['idRegraCirculacao'],
+					$idOperacaoEmprestimo,
+					$condicoesDoExemplar['idGrupo']
+			);
 
-		//Não adiciona registro no grid, caso o exemplar não exista ou seja inválido.
-		if($Exemplares !=  null)
+			if($possuiDireitoDeEmprestimo) {
+					
+				// Verificando a quantidade de empréstimo em aberto realizada para este tipo de material (regra de circulação)
+				$qtdEmprestimoRealizado = $bussEmprestimo->getQtdDeEmprestimoPorUsuarioAndRegraDeCirculacao(
+						$idUsuario,
+						$condicoesDoExemplar['idRegraCirculacao']
+				);
+					
+				if($qtdEmprestimoRealizado <= $condicoesDoExemplar['limiteDeEmprestimo']) {
+
+					// Verificando se o usuário já possui empréstimo aberto para algum exemplar desta obra
+					$isObraEmprestadaParaUsuario = $bussEmprestimo->isObraEmprestadaParaUsuario($tombo, $idUsuario);
+
+					if(!$isObraEmprestadaParaUsuario) {
+							
+						// Efetuando Empréstimo
+						$dataPrevDevolucao = $bussEmprestimo->efetuarEmprestimo($condicoesDoExemplar['idExemplar'], $idUsuario);
+						$MensagemRetorno = "<font color='blue'>Empréstimo efetuado com sucesso!</font>";
+							
+					} else {
+						$MensagemRetorno = "<font color='red'> Você já possui empréstimo desta obra. </font>";
+					}
+
+				} else {
+					$MensagemRetorno = "<font color='red'> Limite de empréstimos esgotado para este material. </br>Quantidade possível: ".$condicoesDoExemplar['limiteDeEmprestimo'] ."</font>";
+				}
+					
+			} else {
+				$MensagemRetorno = "<font color='red'> Você não possui direitos para o empréstimo deste material.</font>";
+			}
+
+		} else {
+			$MensagemRetorno = "<font color='red'> Este exemplar ainda não foi devolvido. </font>";
+		}
+	}
+
+	function CalculaDias($dias)
+	{
+		global $MIOLO;
+		$objFeriado = $MIOLO->GetBusiness('common','feriado');
+
+		$DiaUtil = false;
+		$i = 0;
+
+		while (! $DiaUtil)
 		{
-			$this->addListaExemplares($Resultado[0]);
+			$DiaUtil = true;
+
+			$dia = date('d');
+			$mes = date('m');
+			$ano = date('Y');
+			$hora = date('H');
+			$min = date('i');
+			$seg = date('s');
+
+			$data = mktime($hora,$min,$seg,$mes,$dia+$dias+$i,$ano);
+			$DataLimite = date('D Y-m-d 23:30:00',$data);
+			$DiaSemana = substr($DataLimite,0,-20);
+
+			$fdia = date('d',$data);
+			$fmes = date('m',$data);
+			$fano = date('Y',$data);
+			$fhora = date('H',$data);
+			$fmin = date('i',$data);
+			$fseg = date('s',$data);
+
+			//Verifica se a reserva vai cair em um sabado, domingo ou feriado
+			if (($DiaSemana == 'Sat') or ($DiaSemana == 'Sáb') or ($DiaSemana == 'Sun') or ($DiaSemana == 'Dom') or ($objFeriado->feriado($fdia.'/'.$fmes.'/'.$fano)))
+			{
+				$DiaUtil = false;
+				$i++;
+			}
 		}
 
-		$data=$this->GetData();
+		//var_dump($i+$dias);
 
-
-		$href_datagrid = $MIOLO->GetActionURL($module,$self);
-		$datagrid = new Grid($this->getListaExemplares(), $columns, $href_datagrid,50);
-		$datagrid->SetTitle('Resultado');
-		$datagrid->SetWidth('99%');
-
-
-		//Esconde os campos
-		$this->SetFieldAttr('edtNome','visible', true);
-		$this->SetFieldAttr('edtSenha','visible', false);
-		$this->SetFieldAttr('edtExemplar','visible',  true);
-		$this->SetFieldAttr('edtCartaoAcesso','visible', true);
-
-		// Atributo dos botões
-		$this->SetButtonAttr('btnConsulta','visible',false);
-		$this->SetButtonAttr('btnVerificar','visible',false);
-		$this->SetButtonAttr('btnRealizarEmprestimo','visible',true);
-		$this->SetButtonAttr('btnConfirmar','visible',false);
-		$this->SetButtonAttr('btnVoltar','visible',true);
-
-
-
-		$theme->AppendContent($datagrid);
-
-		$this->SetFieldValue('edtExemplar','');
-
+		return $i+$dias;
 	}
 
 	function getDataLog($Emprestimo)
