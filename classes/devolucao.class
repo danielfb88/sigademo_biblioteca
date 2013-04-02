@@ -220,14 +220,16 @@ class BusinessBibliotecaDevolucao extends Business
 	function devolverExemplar($idEmprestimo, $tombo) {
 		global $MIOLO, $module;
 
-		// Adicionado em 16-03-2013 / Daniel Bonfim
-		if(is_null($this->getTransaction())) {
-			$this->beginTransaction();
-		}
+		$bussEstado = $MIOLO->GetBusiness($module, 'estado');
+		$bussExemplar = $MIOLO->GetBusiness($module, 'exemplar');
 
-		$k = new MKrono();
-		$dataHoje = $k->KDate('%d/%m/%Y %H:%i:00');
-		$dataHoje = ":TO_timestamp('". $dataHoje . "','DD/MM/YYYY HH24:MI:SS')";
+		// Adicionado em 16-03-2013 / Daniel Bonfim
+		if(is_null($this->getTransaction()))
+			$this->beginTransaction();
+
+		// TimeStamp atual
+		$timestampAtual = time();
+		$dataHoje = date('d/m/Y H:i:s', $timestampAtual);
 
 		// bt_devolucao
 		$sql = new sql('datahoradadevolucao', 'bt_emprestimo', 'idemprestimo = ?');
@@ -245,10 +247,6 @@ class BusinessBibliotecaDevolucao extends Business
 				)
 		);
 
-		// Alterando a situação do exemplar
-		$bussEstado = $MIOLO->GetBusiness($module, 'estado');
-		$bussExemplar = $MIOLO->GetBusiness($module, 'exemplar');
-
 		/*
 		 * Modificação em 16-03-2013
 		* Modificando o estado para DISPONÍVEL apenas se o estado atual for diferente de RESERVADO
@@ -256,19 +254,16 @@ class BusinessBibliotecaDevolucao extends Business
 		$idEstadoAtual = $bussExemplar->GetEstadoByExemplar($tombo);
 
 		if($idEstadoAtual != $bussEstado->GetIdByMnemonico("RESERVADO")) {
-
-			$sql = new sql('idestado', 'bt_exemplar', 'numerodotombo = ?');
-			$idEstado = $bussEstado->GetIdByMnemonico("DISPONIVEL");
-
-			$this->Execute(
-					$sql->Update(
-							array($idEstado, $tombo)
-					)
-			);
-
+			$bussExemplar->setTransaction($this->getTransaction());
+			$bussExemplar->alterarEstadoByTombo($tombo, $bussEstado->GetIdByMnemonico("DISPONIVEL"));
 		}
 
-		$this->endTransaction();
+		/*
+		 * Alteração de 'endTransaction' para 'commit' em 01-04-2013
+		* Daniel Bonfim
+		*/
+		if(!is_null($this->getTransaction()))
+			$this->getTransaction()->commit();
 	}
 
 	function DevolucaoComMulta($data)
